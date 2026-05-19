@@ -5,13 +5,13 @@ const admin = require("firebase-admin");
 const app = express();
 app.use(bodyParser.json());
 
-// ================= FIREBASE INIT SAFE =================
+// ===== SAFE FIREBASE INIT =====
 let serviceAccount;
 
 try {
-  serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
-} catch (e) {
-  console.error("FIREBASE_KEY invalid JSON");
+  serviceAccount = JSON.parse(process.env.FIREBASE_KEY || "{}");
+} catch (err) {
+  console.error("Invalid FIREBASE_KEY JSON");
 }
 
 admin.initializeApp({
@@ -21,61 +21,67 @@ admin.initializeApp({
 
 const db = admin.database();
 
-// ================= WEBHOOK CASHIFY =================
+// ===== WEBHOOK CASHIFY =====
 app.post("/webhook", async (req, res) => {
   try {
     const secret = req.headers["x-webhook-secret"];
 
-    if (!secret || secret !== process.env.WEBHOOK_SECRET) {
-      return res.status(401).json({ error: "Unauthorized" });
+    if (secret !== process.env.WEBHOOK_SECRET) {
+      return res.status(401).json({ error: "unauthorized" });
     }
 
-    const body = req.body;
+    const body = req.body || {};
 
-    const txId = body.transaction_id || body.id || "TX_" + Date.now();
+    // normalize data
+    const txId = String(body.transaction_id || body.id || Date.now());
+    const amount = Number(body.amount || 0);
+    const status = String(body.status || "paid");
 
     const data = {
       txId,
-      status: body.status || "paid",
-      amount: Number(body.amount || 0),
-      timestamp: Date.now(),
-      raw: body
+      amount,
+      status,
+      timestamp: Date.now()
     };
 
-    await db.ref("transaction/current").set(data);
-    await db.ref("transaction/history/" + txId).set(data);
+    // prevent Firebase illegal key
+    const safeTxId = txId.replace(/[.#$/\[\]]/g, "_");
 
-    console.log("PAYMENT RECEIVED:", data);
+    // atomic write
+    await db.ref("transaction/current").set(data);
+    await db.ref("transaction/history/" + safeTxId).set(data);
+
+    console.log("PAYMENT OK:", data);
 
     res.json({ success: true });
 
   } catch (err) {
     console.error("WEBHOOK ERROR:", err);
-    res.status(500).send("Server error");
+    res.status(500).send("error");
   }
 });
 
-// ================= TEST =================
+// ===== TEST =====
 app.get("/test", async (req, res) => {
-  const testData = {
+  const test = {
     txId: "TEST_" + Date.now(),
-    status: "paid",
     amount: 10000,
+    status: "paid",
     timestamp: Date.now()
   };
 
-  await db.ref("transaction/current").set(testData);
+  await db.ref("transaction/current").set(test);
 
-  res.send("TEST OK");
+  res.send("OK");
 });
 
-// ================= ROOT =================
+// ===== ROOT =====
 app.get("/", (req, res) => {
   res.send("QRIS BACKEND ACTIVE");
 });
 
-// ================= START =================
+// ===== START =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("QRIS BACKEND RUNNING:", PORT);
+  console.log("RUNNING ON PORT", PORT);
 });
