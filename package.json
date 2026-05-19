@@ -1,0 +1,30 @@
+{
+  "name": "qris-esp32-backend",
+  "version": "1.0.0",
+  "description": "Node.js backend untuk sistem QRIS realtime dengan Firebase Realtime Database",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [
+    "qris",
+    "esp32",
+    "realtime",
+    "firebase",
+    "payment"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "firebase-admin": "^12.0.0",
+    "body-parser": "^1.20.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
