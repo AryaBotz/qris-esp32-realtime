@@ -3,15 +3,21 @@ const app = express();
 
 app.use(express.json());
 
+// ================= ENV =================
+const LICENSE_KEY = process.env.CASHIFY_KEY;
+const QRIS_ID = process.env.QRIS_ID;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+
+// ================= MEMORY =================
+let paymentStatus = "pending";
+let lastTransaction = null;
+
 // ================= ROOT =================
 app.get("/", (req, res) => {
   res.send("QRIS BACKEND ACTIVE");
 });
 
-// ================= STATUS =================
-let paymentStatus = "pending";
-let lastTransaction = null;
-
+// ================= STATUS (ESP32 READ) =================
 app.get("/status", (req, res) => {
   res.json({
     status: paymentStatus,
@@ -19,47 +25,82 @@ app.get("/status", (req, res) => {
   });
 });
 
-// ================= GENERATE (DUMMY dulu biar tidak crash) =================
-app.post("/generate", (req, res) => {
-  const { amount } = req.body || {};
+// ================= GENERATE QR (CASHIFY REAL) =================
+app.post("/generate", async (req, res) => {
+  try {
+    const amount = req.body.amount;
 
-  if (!amount) {
-    return res.status(400).json({ error: "amount required" });
+    if (!amount) {
+      return res.status(400).json({ error: "amount required" });
+    }
+
+    const response = await fetch("https://cashify.my.id/api/generate/qris", {
+      method: "POST",
+      headers: {
+        "x-license-key": LICENSE_KEY,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        id: QRIS_ID,
+        amount: amount,
+        useUniqueCode: true,
+        packageIds: ["id.dana"],
+        expiredInMinutes: 15
+      })
+    });
+
+    const json = await response.json();
+    const data = json.data;
+
+    lastTransaction = {
+      transactionId: data.transactionId,
+      amount: data.totalAmount,
+      status: "pending",
+      time: Date.now()
+    };
+
+    paymentStatus = "pending";
+
+    res.json({
+      transactionId: data.transactionId,
+      qr_string: data.qr_string,
+      totalAmount: data.totalAmount
+    });
+
+  } catch (err) {
+    console.log("GENERATE ERROR:", err.message);
+    res.status(500).json({ error: "generate failed" });
   }
-
-  const transactionId = "TX" + Date.now();
-
-  lastTransaction = {
-    transactionId,
-    amount,
-    status: "pending"
-  };
-
-  paymentStatus = "pending";
-
-  res.json({
-    transactionId,
-    qr_string: "DUMMY_QR_" + transactionId,
-    totalAmount: amount + 3
-  });
 });
 
-// ================= WEBHOOK (TEST MODE) =================
+// ================= WEBHOOK (CASHIFY CALLBACK) =================
 app.post("/webhook", (req, res) => {
-  const { status, amount, transaction_id } = req.body || {};
+  try {
+    const secret = req.headers["x-webhook-secret"];
 
-  paymentStatus = status || "pending";
+    if (WEBHOOK_SECRET && secret !== WEBHOOK_SECRET) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
 
-  lastTransaction = {
-    txId: transaction_id || "UNKNOWN",
-    status: status || "pending",
-    amount: amount || 0,
-    time: Date.now()
-  };
+    const { status, amount, transaction_id } = req.body;
 
-  console.log("WEBHOOK RECEIVED:", lastTransaction);
+    paymentStatus = status;
 
-  res.json({ success: true });
+    lastTransaction = {
+      transactionId: transaction_id,
+      amount,
+      status,
+      time: Date.now()
+    };
+
+    console.log("PAYMENT UPDATE:", lastTransaction);
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "webhook error" });
+  }
 });
 
 // ================= TEST =================
@@ -71,5 +112,5 @@ app.get("/test", (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("🔥 SERVER RUNNING ON PORT", PORT);
+  console.log("🔥 QRIS BACKEND RUNNING ON", PORT);
 });
