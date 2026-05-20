@@ -5,11 +5,12 @@ const axios = require("axios");
 const app = express();
 app.use(bodyParser.json());
 
-// ===================== CONFIG =====================
-const LICENSE_KEY = "ISI_LICENSE_KAMU";
-const QRIS_ID = "ISI_QRIS_ID_KAMU";
+// ===================== ENV =====================
+const LICENSE_KEY = process.env.CASHIFY_KEY;
+const QRIS_ID = process.env.QRIS_ID;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-// ===================== MEMORY STATUS =====================
+// ===================== MEMORY =====================
 let paymentStatus = "pending";
 let lastTransaction = null;
 
@@ -18,7 +19,7 @@ app.get("/", (req, res) => {
   res.send("QRIS BACKEND ACTIVE");
 });
 
-// ===================== STATUS (ESP32 READ HERE) =====================
+// ===================== STATUS (ESP32) =====================
 app.get("/status", (req, res) => {
   res.json({
     status: paymentStatus,
@@ -26,10 +27,14 @@ app.get("/status", (req, res) => {
   });
 });
 
-// ===================== GENERATE QR FROM CASHIFY =====================
+// ===================== GENERATE QR =====================
 app.post("/generate", async (req, res) => {
   try {
     const { amount } = req.body;
+
+    if (!amount) {
+      return res.status(400).json({ error: "amount required" });
+    }
 
     const response = await axios.post(
       "https://cashify.my.id/api/generate/qris",
@@ -50,6 +55,15 @@ app.post("/generate", async (req, res) => {
 
     const data = response.data.data;
 
+    lastTransaction = {
+      txId: data.transactionId,
+      status: "pending",
+      amount: data.totalAmount,
+      time: Date.now()
+    };
+
+    paymentStatus = "pending";
+
     res.json({
       transactionId: data.transactionId,
       qr_string: data.qr_string,
@@ -62,10 +76,15 @@ app.post("/generate", async (req, res) => {
   }
 });
 
-// ===================== WEBHOOK CASHIFY =====================
+// ===================== WEBHOOK SECURITY =====================
 app.post("/webhook", (req, res) => {
   try {
-    console.log("WEBHOOK IN:", req.body);
+    const secret = req.headers["x-webhook-secret"];
+
+    // 🔐 SECURITY CHECK
+    if (!WEBHOOK_SECRET || secret !== WEBHOOK_SECRET) {
+      return res.status(401).json({ error: "unauthorized webhook" });
+    }
 
     const status = req.body.status || "pending";
     const amount = req.body.amount || 0;
@@ -80,11 +99,9 @@ app.post("/webhook", (req, res) => {
       time: Date.now()
     };
 
-    console.log("STATUS UPDATE:", paymentStatus);
+    console.log("PAYMENT UPDATE:", lastTransaction);
 
-    res.json({
-      success: true
-    });
+    res.json({ success: true });
 
   } catch (err) {
     console.log("WEBHOOK ERROR:", err);
@@ -102,8 +119,8 @@ app.get("/test", (req, res) => {
   });
 });
 
-// ===================== START SERVER =====================
+// ===================== START =====================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("🔥 QRIS BACKEND RUNNING ON PORT", PORT);
+  console.log("🔥 SECURE QRIS BACKEND RUNNING ON PORT", PORT);
 });
